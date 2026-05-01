@@ -1,0 +1,160 @@
+clc;
+clear;
+close all;
+
+%% =========================
+% PART 1: PARAMETERS
+% =========================
+Fs = 10000;     % Sampling frequency
+Fc = 1000;      % Carrier frequency
+Fm = 100;       % Message frequency
+
+Am = 1;         % Message amplitude
+Ac = 2;         % Carrier amplitude
+
+t = 0:1/Fs:0.05; % Time vector
+
+% Message signal
+m_t = Am * cos(2*pi*Fm*t);
+
+% Carrier signal
+c_t = Ac * cos(2*pi*Fc*t);
+
+% Plot
+figure;
+subplot(2,1,1); plot(t,m_t); title('Message Signal'); grid on;
+subplot(2,1,2); plot(t,c_t); title('Carrier Signal'); grid on;
+%% =========================
+% PART 2: DSB-SC
+% =========================
+s_dsb = m_t .* c_t;
+
+figure;
+subplot(2,1,1); plot(t,s_dsb); title('DSB-SC Signal'); grid on;
+
+% FFT
+L = length(s_dsb);
+f = linspace(-Fs/2, Fs/2, L);
+Y = abs(fftshift(fft(s_dsb)))/L;
+
+subplot(2,1,2); plot(f,Y); title('DSB Spectrum'); grid on;
+xlim([-1500 1500]);
+%% =========================
+% PART 3: AM
+% =========================
+s_am = (Ac + m_t).*cos(2*pi*Fc*t);
+
+figure;
+subplot(2,1,1); plot(t,s_am); title('AM Signal'); grid on;
+
+Y = abs(fftshift(fft(s_am)))/L;
+subplot(2,1,2); plot(f,Y); title('AM Spectrum'); grid on;
+xlim([-1500 1500]);
+%% =========================
+% PART 4: SSB
+% =========================
+m_hat = imag(hilbert(m_t));
+
+s_ssb = m_t.*cos(2*pi*Fc*t) - m_hat.*sin(2*pi*Fc*t);
+
+figure;
+subplot(2,1,1); plot(t,s_ssb); title('SSB Signal'); grid on;
+
+Y = abs(fftshift(fft(s_ssb)))/L;
+subplot(2,1,2); plot(f,Y); title('SSB Spectrum'); grid on;
+xlim([-1500 1500]);
+%% =========================
+% PART 5: VSB
+% =========================
+s_dsb = m_t .* c_t;
+
+[b,a] = butter(4, [800 1200]/(Fs/2), 'bandpass');
+s_vsb = filtfilt(b,a,s_dsb);
+
+figure;
+subplot(2,1,1); plot(t,s_vsb); title('VSB Signal'); grid on;
+
+Y = abs(fftshift(fft(s_vsb)))/L;
+subplot(2,1,2); plot(f,Y); title('VSB Spectrum'); grid on;
+xlim([-1500 1500]);
+%% =========================
+% PART 6: FM
+% =========================
+kf = 100;
+
+int_m = cumsum(m_t)/Fs;
+s_fm = Ac*cos(2*pi*Fc*t + 2*pi*kf*int_m);
+
+figure;
+subplot(2,1,1); plot(t,s_fm); title('FM Signal'); grid on;
+
+Y = abs(fftshift(fft(s_fm)))/L;
+subplot(2,1,2); plot(f,Y); title('FM Spectrum'); grid on;
+xlim([-1500 1500]);
+%% =========================
+% PART 7: PM
+% =========================
+kp = pi;
+
+s_pm = Ac*cos(2*pi*Fc*t + kp*m_t);
+
+figure;
+subplot(2,1,1); plot(t,s_pm); title('PM Signal'); grid on;
+
+Y = abs(fftshift(fft(s_pm)))/L;
+subplot(2,1,2); plot(f,Y); title('PM Spectrum'); grid on;
+xlim([-1500 1500]);
+%% =========================
+% PART 8: NOISE
+% =========================
+SNR = 8;
+
+r_am = awgn(s_am,SNR,'measured');
+r_dsb = awgn(s_dsb,SNR,'measured');
+r_ssb = awgn(s_ssb,SNR,'measured');
+r_vsb = awgn(s_vsb,SNR,'measured');
+r_fm = awgn(s_fm,SNR,'measured');
+r_pm = awgn(s_pm,SNR,'measured');
+%% =========================
+% DEMODULATION (ALL SIGNALS)
+% =========================
+
+% Low-pass filter
+[b,a] = butter(5,150/(Fs/2),'low');
+
+%% -------- AM DEMOD --------
+m_rec_am = abs(r_am);                  % envelope detector
+m_rec_am = filtfilt(b,a,m_rec_am);     % smooth
+m_rec_am = m_rec_am - mean(m_rec_am);  % remove DC
+
+%% -------- DSB-SC DEMOD --------
+m_rec_dsb = r_dsb .* cos(2*pi*Fc*t);   % multiply by carrier
+m_rec_dsb = filtfilt(b,a,m_rec_dsb);   % LPF
+m_rec_dsb = (2/Ac) * m_rec_dsb;        % scaling
+
+%% -------- SSB DEMOD --------
+m_rec_ssb = r_ssb .* cos(2*pi*Fc*t);
+m_rec_ssb = filtfilt(b,a,m_rec_ssb);
+m_rec_ssb = (2/Ac) * m_rec_ssb;
+
+%% -------- VSB DEMOD --------
+m_rec_vsb = r_vsb .* cos(2*pi*Fc*t);
+m_rec_vsb = filtfilt(b,a,m_rec_vsb);
+m_rec_vsb = (2/Ac) * m_rec_vsb;
+
+%% -------- FM DEMOD --------
+z = hilbert(r_fm);
+phase = unwrap(angle(z));
+
+freq = diff(phase)*Fs/(2*pi);   % instantaneous frequency
+freq = [freq freq(end)];
+
+m_rec_fm = (freq - Fc)/kf;      % recover message
+m_rec_fm = filtfilt(b,a,m_rec_fm);
+
+%% -------- PM DEMOD --------
+z = hilbert(r_pm);
+phase = unwrap(angle(z));
+
+m_rec_pm = (phase - 2*pi*Fc*t)/kp;
+m_rec_pm = filtfilt(b,a,m_rec_pm);
